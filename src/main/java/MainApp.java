@@ -1,4 +1,6 @@
+import liquibase.Contexts;
 import liquibase.Liquibase;
+import liquibase.configuration.LiquibaseConfiguration;
 import liquibase.database.Database;
 import liquibase.database.DatabaseFactory;
 import liquibase.database.jvm.JdbcConnection;
@@ -9,11 +11,17 @@ import liquibase.diff.compare.CompareControl;
 import liquibase.diff.output.DiffOutputControl;
 import liquibase.diff.output.changelog.DiffToChangeLog;
 import liquibase.exception.LiquibaseException;
+import liquibase.parser.LiquibaseParser;
 import liquibase.resource.FileSystemResourceAccessor;
+import liquibase.sdk.Context;
+import liquibase.sqlgenerator.SqlGenerator;
+import liquibase.sqlgenerator.SqlGeneratorFactory;
 import liquibase.structure.DatabaseObject;
+import liquibase.util.SqlParser;
 
+import javax.swing.*;
 import javax.xml.parsers.ParserConfigurationException;
-import java.io.IOException;
+import java.io.*;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,38 +29,49 @@ import java.util.Map;
 
 public class MainApp {
     public static void main(String[] args) {
-
-        String dbReferencePath = "jdbc:mysql://[ip]:3306/[DB_NAME]";
+        String dbReferencePath = "jdbc:mysql://[ip]:[port]";
         String dbReferenceUserName = "userName";
-        String dbReferencePassword = "password";
+        String dbReferencePassword = "pass";
 
-        String dbTargetPath = "jdbc:mysql://[ip]:3306/[DB_NAME]";
+        String dbTargetPath = "jdbc:mysql://[ip]:[port]";
         String dbTargetUserName = "userName";
-        String dbTargetPassword = "password";
+        String dbTargetPassword = "pass";
 
-        Connection conReference;
-        Connection conTarget;
+        ArrayList<String> dbNames = new ArrayList<>();
         try {
-            conReference = DriverManager.getConnection(dbReferencePath, dbReferenceUserName, dbReferencePassword);
-            conTarget = DriverManager.getConnection(dbTargetPath, dbTargetUserName, dbTargetPassword);
+            Class.forName("com.mysql.jdbc.Driver");
+            Connection con = DriverManager.getConnection(dbReferencePath, dbReferenceUserName, dbReferencePassword);
+            ResultSet rs = con.getMetaData().getCatalogs();
+            //schema list that name contains "keyword"
+            getSchemaList("keyword", dbNames, rs);
+            con.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(0);
+        }
 
-            diff(conReference, conTarget);
-
+        try {
+            Connection conReference = null;
+            Connection conTarget = null;
+            for (String dbName : dbNames) {
+                conReference = DriverManager.getConnection(dbReferencePath + "/" + dbName, dbReferenceUserName, dbReferencePassword);
+                conTarget = DriverManager.getConnection(dbTargetPath + "/" + dbName, dbTargetUserName, dbTargetPassword);
+                File targetFile = new File("./results/" + dbName + ".xml");
+                PrintStream stream = new PrintStream(targetFile);
+                diff(conReference, conTarget, stream);
+            }
             conReference.close();
             conTarget.close();
         } catch (Exception e) {
             e.printStackTrace();
             System.exit(0);
         }
-
-
     }
 
 
-    static void diff(Connection referenceConnection, Connection targetConnection) throws LiquibaseException, IOException, ParserConfigurationException, SQLException {
+    static void diff(Connection referenceConnection, Connection targetConnection, PrintStream stream) {
 
         Liquibase liquibase = null;
-
         try {
 
             Database referenceDatabase = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(referenceConnection));
@@ -60,15 +79,10 @@ public class MainApp {
 
             liquibase = new Liquibase("", new FileSystemResourceAccessor(), referenceDatabase);
             DiffResult diffResult = liquibase.diff(referenceDatabase, targetDatabase, new CompareControl());
-            new DiffToChangeLog(diffResult, new DiffOutputControl()).print(System.out);
-
+            DiffToChangeLog diffToChangeLog = new DiffToChangeLog(diffResult, new DiffOutputControl());
+            diffToChangeLog.print(stream);
         } catch (Exception e) {
             e.printStackTrace();
-        } finally {
-
-            if (liquibase != null) {
-                liquibase.forceReleaseLocks();
-            }
         }
     }
 
@@ -80,7 +94,7 @@ public class MainApp {
             final DiffGeneratorFactory generatorFactory = DiffGeneratorFactory.getInstance();
             final CompareControl compareControl = new CompareControl();
             final DiffResult diffResult = generatorFactory.compare(referenceDatabase, targetDatabase, compareControl);
-            boolean ignoreDefaultValueDifference = true;
+            boolean ignoreDefaultValueDifference = false;
             if (ignoreDefaultValueDifference) {
                 Map<DatabaseObject, ObjectDifferences> changedObjects = diffResult.getChangedObjects();
                 for (DatabaseObject changedDbObject : changedObjects.keySet()) {
