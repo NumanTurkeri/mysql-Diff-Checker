@@ -59,6 +59,19 @@ public class MainApp {
                 File targetFile = new File("./results/" + dbName + ".xml");
                 PrintStream stream = new PrintStream(targetFile);
                 diff(conReference, conTarget, stream);
+
+                try {
+                    Runtime.getRuntime().exec("java -jar liquibase.jar " +
+                            "--driver=com.mysql.cj.jdbc.Driver " +
+                            " --classpath=mysql-connector.jar " +
+                            "--changeLogFile=results/" + dbName + ".xml " +
+                            "--url=jdbc:mysql://localhost:3306/?serverTimezone=UTC " +
+                            "--username=userName " +
+                            "--password=password " +
+                            "updateSQL > sqlScripts/" + dbName + ".sql");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
             conReference.close();
             conTarget.close();
